@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# catnmap 2.0 | (c) AC Kondo 1999-2026
+# catnmap 0.1.1 | (c) AC Kondo 1999-2026
 # Real nmap wrapper: parallel, service/version detection, -oA output.
 set -u
 
 usage() {
   cat <<'EOF'
-catnmap 2.0
+catnmap 0.1.1
 Usage: catnmap HOST [options]
 
   -p PORTS     ports (80,443,8000-8010) or -p- for all
