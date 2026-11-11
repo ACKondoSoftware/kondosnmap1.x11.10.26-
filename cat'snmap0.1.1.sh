@@ -1,98 +1,51 @@
 #!/usr/bin/env bash
-# Cat's Nmap 2.0 | © AC Kondo 1999–2026
-# Real nmap wrapper: parallel, service/version detection, -oA output.
-set -u
+# fix.sh - clean up the catnmap wrapper: rename, drop dead var, fix -A/-sV dup, add README
+set -euo pipefail
 
-usage() {
-  cat <<'EOF'
-Cat's Nmap 2.0
-Usage: catnmap HOST [options]
+cd "$(dirname "$0")"
 
-  -p PORTS     ports (80,443,8000-8010) or -p- for all
-  -t 0-5       timing template (default 4)
-  -T N         alias for -t
-  -sV          service/version detection
-  -O           OS detection (needs root)
-  -A           aggressive: -sV -O -sC --traceroute (needs root)
-  -U           UDP top 50 (needs root)
-  -S           ping sweep only (-sn)
-  --top N      scan N most common ports
-  -6           IPv6
-  -n           no DNS resolution
-  -q           print open ports only
-  -o NAME      output prefix (default: scans/<host>_<stamp>)
+src="cat'snmap0.1.1.sh"
+dst="catnmap"
 
-  Output is always written as .nmap / .gnmap / .xml via -oA.
-EOF
-}
-
-command -v nmap >/dev/null 2>&1 || { echo 'Error: nmap not installed (brew install nmap).' >&2; exit 1; }
-(($#)) || { usage; exit 2; }
-
-host=$1; shift
-[[ $host != -* && -n $host ]] || { echo 'Invalid host' >&2; exit 2; }
-
-ports='' timing=4 family='' quiet=0 nodns=0 out='' mode=''
-sv=0 os=0 agg=0 udp=0 sweep=0 top=''
-
-while (($#)); do
-  case $1 in
-    -p) [[ $# -ge 2 ]] || { usage; exit 2; }; ports=$2; shift 2 ;;
-    -t|-T) [[ $# -ge 2 ]] || { usage; exit 2; }; timing=$2; shift 2 ;;
-    -sV) sv=1; shift ;;
-    -O) os=1; shift ;;
-    -A) agg=1; shift ;;
-    -U) udp=1; shift ;;
-    -S) sweep=1; shift ;;
-    --top) [[ $# -ge 2 ]] || { usage; exit 2; }; top=$2; shift 2 ;;
-    -6) family=-6; shift ;;
-    -n) nodns=1; shift ;;
-    -q) quiet=1; shift ;;
-    -o) [[ $# -ge 2 ]] || { usage; exit 2; }; out=$2; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
-  esac
-done
-
-[[ $timing =~ ^[0-5]$ ]] || { echo 'Timing must be 0-5' >&2; exit 2; }
-[[ -z $top || $top =~ ^[0-9]+$ ]] || { echo '--top needs a number' >&2; exit 2; }
-if [[ -n $ports ]]; then
-  [[ $ports == - ]] || [[ $ports =~ ^[0-9]+([-,][0-9]+)*$ ]] || { echo 'Invalid port spec' >&2; exit 2; }
+# BSD sed needs -i '', GNU sed needs -i. Pick whichever this system is.
+if sed --version >/dev/null 2>&1; then
+  sedi() { sed -i -e "$@"; }
+else
+  sedi() { sed -i '' -e "$@"; }
 fi
 
-# Root check for privileged scans
-if (( os || agg || udp )) && [[ $(id -u) -ne 0 ]]; then
-  echo '[!] -O / -A / -U need root - re-run with sudo.' >&2
+# 1. rename
+if [[ -f $src && ! -f $dst ]]; then
+  mv "$src" "$dst"
+  echo "[+] renamed -> $dst"
+elif [[ -f $dst ]]; then
+  echo "[=] $dst already exists, skipping rename"
+else
+  echo "[!] $src not found" >&2
   exit 1
 fi
 
-stamp=$(date +%Y%m%d-%H%M%S)
-safe=${host//[.:\/ ]/_}
-[[ -n $out ]] || out="scans/${safe}_${stamp}"
-mkdir -p "$(dirname "$out")"
+# 2. header: version + filename reference
+sedi 's|^# Cat.s Nmap 2\.0 |.*|# catnmap 2.0 | © AC Kondo 1999-2026|' "$dst" 2>/dev/null || true
+sedi 's|^# Cat'"'"'s Nmap 2\.0 |.*|# catnmap 2.0 | (c) AC Kondo 1999-2026|' "$dst"
+sedi 's|^Cat'"'"'s Nmap 2\.0$|catnmap 2.0|' "$dst"
+sedi 's|^Usage: catnmap HOST|Usage: catnmap HOST|' "$dst"
 
-cmd=(nmap -T"$timing" --reason -oA "$out")
-((nodns)) && cmd+=(-n)
-[[ -n $family ]] && cmd+=("$family")
-((sv)) && cmd+=(-sV)
-((os)) && cmd+=(-O --osscan-guess)
-((agg)) && cmd+=(-A)
-((udp)) && cmd+=(-sU --top-ports 50)
-((sweep)) && cmd+=(-sn)
-[[ -n $top ]] && cmd+=(--top-ports "$top")
-[[ -n $ports ]] && cmd+=(-p "$ports")
-((quiet)) && cmd+=(--open)
-cmd+=("$host")
+# 3. drop the dead variable
+sedi "s| out='' mode=''| out=''|" "$dst"
 
-((quiet)) || printf '[*] %s\n[*] results -> %s.{nmap,gnmap,xml}\n\n' "${cmd[*]}" "$out"
+# 4. suppress -sV when -A already implies it
+sedi 's|((sv)) && cmd+=(-sV)|((sv \&\& !agg)) \&\& cmd+=(-sV)|' "$dst"
 
-if ((quiet)); then
-  "${cmd[@]}" | grep -E '^[0-9]+/(tcp|udp)' 
-  rc=${PIPESTATUS[0]}
-else
-  "${cmd[@]}"
-  rc=$?
-fi
+# 5. README
+cat > README.md <<'EOF'
+# catnmap
 
-printf '\n[*] done (exit %d)\n' "$rc"
-exit "$rc"
+Thin, safe wrapper around `nmap`. Validates input, builds the argv properly, and
+always writes `.nmap` / `.gnmap` / `.xml` so results never live only in scrollback.
+
+## Install
+
+```sh
+brew install nmap
+chmod +x catnmap
